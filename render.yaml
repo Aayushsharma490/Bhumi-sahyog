@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: bhumi-sahyog-backend
+    env: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: WHATSAPP_ENABLED
+        value: "true"
+      - key: ADMIN_WHATSAPP_PHONE
+        value: "7727038430"
+      - key: GROQ_API_KEY
+        sync: false
