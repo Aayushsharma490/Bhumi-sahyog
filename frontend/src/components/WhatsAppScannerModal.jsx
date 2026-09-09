@@ -23,19 +23,33 @@ export default function WhatsAppScannerModal({ isOpen, onClose }) {
   const [customBackendUrl, setCustomBackendUrl] = useState(() => getApiBaseUrl() || 'http://localhost:3001');
   const [showSettings, setShowSettings] = useState(false);
   const [serverReachable, setServerReachable] = useState(true);
+  const [consecutiveErrors, setConsecutiveErrors] = useState(0);
 
   const fetchStatus = async () => {
     try {
       const res = await apiFetch('/api/whatsapp/status');
       if (res.ok) {
         const data = await res.json();
-        setStatus(data);
+        setStatus(prev => ({
+          ...data,
+          // Retain QR code if previous had QR and new status is still initializing/connecting without new QR
+          qr: data.qr || (data.ready ? null : prev.qr),
+        }));
         setServerReachable(true);
+        setConsecutiveErrors(0);
       } else {
-        setServerReachable(false);
+        setConsecutiveErrors(c => {
+          const next = c + 1;
+          if (next >= 4) setServerReachable(false);
+          return next;
+        });
       }
     } catch (err) {
-      setServerReachable(false);
+      setConsecutiveErrors(c => {
+        const next = c + 1;
+        if (next >= 4) setServerReachable(false);
+        return next;
+      });
     }
   };
 

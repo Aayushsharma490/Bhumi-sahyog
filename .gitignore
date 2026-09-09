@@ -54,6 +54,8 @@ lerna-debug.log*
 ehthumbs.db
 Thumbs.db
 
-# IDE agent context
+# IDE agent context & internal architecture guides
 .gemini/
 .system_generated/
+AI_PREDICTION_ARCHITECTURE.md
+*ARCHITECTURE*.md
