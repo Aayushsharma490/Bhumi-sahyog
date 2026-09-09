@@ -1,24 +1,52 @@
 // api.js — Centralized API base URL resolver and fetch wrapper
-// Seamlessly connects Netlify frontend to public HTTPS tunnel / local backend server
+// Seamlessly connects Netlify frontend to Render Cloud API & local tunnels
 
+export const DEFAULT_RENDER_URL = 'https://bhumi-sahyog.onrender.com';
 export const DEFAULT_TUNNEL_URL = 'https://bhumi-sahyog-jaipur.loca.lt';
+
+/**
+ * Clean & sanitize user-entered API URL
+ * Handles brackets e.g. ]https://..., trailing slashes, /api suffixes, spaces, quotes
+ */
+export function cleanApiUrl(url) {
+  if (!url) return '';
+  let cleaned = String(url).trim();
+  // Strip leading/trailing brackets, quotes, backticks
+  cleaned = cleaned.replace(/^[\[\]"'`\s]+|[\[\]"'`\s]+$/g, '');
+  // Remove trailing slashes
+  cleaned = cleaned.replace(/\/+$/, '');
+  // Strip trailing /api if user appended it
+  cleaned = cleaned.replace(/\/api$/, '');
+  
+  if (!cleaned) return '';
+  if (!cleaned.startsWith('http://') && !cleaned.startsWith('https://')) {
+    if (cleaned.startsWith('localhost') || cleaned.startsWith('127.0.0.1')) {
+      cleaned = 'http://' + cleaned;
+    } else {
+      cleaned = 'https://' + cleaned;
+    }
+  }
+  return cleaned;
+}
 
 export function getApiBaseUrl() {
   const custom = localStorage.getItem('bhumi_api_server_url');
   if (custom && custom.trim()) {
-    return custom.trim().replace(/\/+$/, '');
+    const cleaned = cleanApiUrl(custom);
+    if (cleaned) return cleaned;
   }
   // If running on local dev server
   if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
     return 'http://localhost:3001';
   }
-  // Default to live public HTTPS tunnel when on Netlify or remote
-  return DEFAULT_TUNNEL_URL;
+  // Default to live Render cloud backend on Netlify / production
+  return DEFAULT_RENDER_URL;
 }
 
 export function setApiBaseUrl(url) {
-  if (url && url.trim()) {
-    localStorage.setItem('bhumi_api_server_url', url.trim().replace(/\/+$/, ''));
+  const cleaned = cleanApiUrl(url);
+  if (cleaned) {
+    localStorage.setItem('bhumi_api_server_url', cleaned);
   } else {
     localStorage.removeItem('bhumi_api_server_url');
   }
@@ -40,35 +68,25 @@ export async function apiFetch(endpoint, options = {}) {
     },
   };
 
-  // 1. Try with configured baseUrl (e.g. HTTPS tunnel or localhost)
-  if (baseUrl) {
+  const candidateUrls = Array.from(new Set([
+    baseUrl,
+    DEFAULT_RENDER_URL,
+    DEFAULT_TUNNEL_URL,
+    '',
+    'http://localhost:3001',
+  ])).filter(Boolean);
+
+  for (const host of candidateUrls) {
     try {
-      const res = await fetch(`${baseUrl}${cleanEndpoint}`, fetchOptions);
-      if (res.ok || res.status < 500) return res;
+      const url = host ? `${host}${cleanEndpoint}` : cleanEndpoint;
+      const res = await fetch(url, fetchOptions);
+      if (res.ok || res.status < 500) {
+        return res;
+      }
     } catch (e) {
-      // Continue to next fallback
+      // Continue to next fallback host
     }
   }
-
-  // 2. Try default HTTPS tunnel if baseUrl was custom and failed
-  if (baseUrl !== DEFAULT_TUNNEL_URL) {
-    try {
-      const resTunnel = await fetch(`${DEFAULT_TUNNEL_URL}${cleanEndpoint}`, fetchOptions);
-      if (resTunnel.ok || resTunnel.status < 500) return resTunnel;
-    } catch (e) {}
-  }
-
-  // 3. Try relative endpoint
-  try {
-    const res = await fetch(cleanEndpoint, fetchOptions);
-    if (res.ok || res.status < 500) return res;
-  } catch (e) {}
-
-  // 4. Try direct http://localhost:3001
-  try {
-    const res = await fetch(`http://localhost:3001${cleanEndpoint}`, fetchOptions);
-    if (res.ok || res.status < 500) return res;
-  } catch (e) {}
 
   throw new Error('Backend server is unreachable. Please make sure the backend is running.');
 }

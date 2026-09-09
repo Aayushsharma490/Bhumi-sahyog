@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { 
   MessageCircle, QrCode, CheckCircle2, RefreshCw, Smartphone, 
-  Send, ExternalLink, ShieldCheck, AlertCircle, Loader2, X, Settings, Check
+  Send, ExternalLink, ShieldCheck, AlertCircle, Loader2, X, Settings, Check, Cloud, Server
 } from 'lucide-react';
-import { apiFetch, getApiBaseUrl, setApiBaseUrl } from '../config/api';
+import { apiFetch, getApiBaseUrl, setApiBaseUrl, cleanApiUrl, DEFAULT_RENDER_URL, DEFAULT_TUNNEL_URL } from '../config/api';
 
 export default function WhatsAppScannerModal({ isOpen, onClose }) {
   const [status, setStatus] = useState({
@@ -20,7 +20,7 @@ export default function WhatsAppScannerModal({ isOpen, onClose }) {
   const [testResult, setTestResult] = useState(null);
   
   // Backend Connection URL setting
-  const [customBackendUrl, setCustomBackendUrl] = useState(() => getApiBaseUrl() || 'http://localhost:3001');
+  const [customBackendUrl, setCustomBackendUrl] = useState(() => getApiBaseUrl() || DEFAULT_RENDER_URL);
   const [showSettings, setShowSettings] = useState(false);
   const [serverReachable, setServerReachable] = useState(true);
   const [consecutiveErrors, setConsecutiveErrors] = useState(0);
@@ -30,9 +30,14 @@ export default function WhatsAppScannerModal({ isOpen, onClose }) {
       const res = await apiFetch('/api/whatsapp/status');
       if (res.ok) {
         const data = await res.json();
+        
+        // If server says qr_ready but qr dataurl is null, request an instant restart
+        if (data.status === 'qr_ready' && !data.qr && !data.ready) {
+          apiFetch('/api/whatsapp/restart', { method: 'POST' }).catch(() => {});
+        }
+
         setStatus(prev => ({
           ...data,
-          // Retain QR code if previous had QR and new status is still initializing/connecting without new QR
           qr: data.qr || (data.ready ? null : prev.qr),
         }));
         setServerReachable(true);
@@ -61,10 +66,19 @@ export default function WhatsAppScannerModal({ isOpen, onClose }) {
   }, [isOpen, customBackendUrl]);
 
   const handleSaveBackendUrl = (e) => {
-    e.preventDefault();
-    setApiBaseUrl(customBackendUrl);
+    if (e) e.preventDefault();
+    const sanitized = cleanApiUrl(customBackendUrl);
+    setCustomBackendUrl(sanitized);
+    setApiBaseUrl(sanitized);
     setShowSettings(false);
     fetchStatus();
+  };
+
+  const handleApplyPreset = (url) => {
+    const sanitized = cleanApiUrl(url);
+    setCustomBackendUrl(sanitized);
+    setApiBaseUrl(sanitized);
+    setTimeout(fetchStatus, 300);
   };
 
   const handleRestart = async () => {
@@ -153,31 +167,51 @@ export default function WhatsAppScannerModal({ isOpen, onClose }) {
 
         {/* Backend Connection Settings Dropdown */}
         {showSettings && (
-          <form onSubmit={handleSaveBackendUrl} className="my-3 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+          <form onSubmit={handleSaveBackendUrl} className="my-3 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2.5">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-slate-800">
+              <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                <Server size={14} className="text-emerald-600" />
                 Backend Server URL (Node API):
               </label>
-              <span className="text-[10px] text-slate-500 font-mono">
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md font-mono bg-slate-200">
                 {serverReachable ? '🟢 Connected' : '🔴 Unreachable'}
               </span>
             </div>
             <p className="text-[11px] text-slate-500">
-              Netlify पर रियल QR कोड पाने के लिए अपना बैकएंड सर्वर URL (जैसे <code>http://localhost:3001</code> या tunnel URL) दर्ज करें:
+              Live Cloud API (Render) या Localhost से कनेक्ट करें:
             </p>
             <div className="flex gap-2">
               <input
                 type="text"
                 value={customBackendUrl}
                 onChange={(e) => setCustomBackendUrl(e.target.value)}
-                placeholder="http://localhost:3001"
-                className="flex-1 px-3 py-1.5 border border-slate-300 rounded-xl text-xs font-mono"
+                placeholder="https://bhumi-sahyog.onrender.com"
+                className="flex-1 px-3 py-1.5 border border-slate-300 rounded-xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
               <button
                 type="submit"
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-1 cursor-pointer"
+                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-1 cursor-pointer transition-all shrink-0"
               >
                 <Check size={14} /> Connect
+              </button>
+            </div>
+
+            {/* 1-Click Presets */}
+            <div className="flex items-center gap-1.5 pt-1 overflow-x-auto text-[10px]">
+              <span className="text-slate-400 font-semibold shrink-0">Presets:</span>
+              <button
+                type="button"
+                onClick={() => handleApplyPreset(DEFAULT_RENDER_URL)}
+                className="px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-800 font-bold hover:bg-emerald-200 cursor-pointer flex items-center gap-1 shrink-0"
+              >
+                <Cloud size={10} /> Render Cloud
+              </button>
+              <button
+                type="button"
+                onClick={() => handleApplyPreset('http://localhost:3001')}
+                className="px-2 py-0.5 rounded-lg bg-slate-200 text-slate-700 font-bold hover:bg-slate-300 cursor-pointer shrink-0"
+              >
+                Localhost (3001)
               </button>
             </div>
           </form>

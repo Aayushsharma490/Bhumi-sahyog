@@ -98,6 +98,7 @@ export async function initWhatsApp(forceNewSession = false) {
       if (qr) {
         latestQrCodeRaw = qr;
         connectionStatus = 'qr_ready';
+        isInitializing = false;
         try {
           latestQrCodeDataUrl = await QRCode.toDataURL(qr, {
             margin: 2,
@@ -116,6 +117,7 @@ export async function initWhatsApp(forceNewSession = false) {
       // 2. Connected Event
       if (connection === 'open') {
         waReady = true;
+        isInitializing = false;
         connectionStatus = 'connected';
         latestQrCodeDataUrl = null;
         latestQrCodeRaw = null;
@@ -126,25 +128,25 @@ export async function initWhatsApp(forceNewSession = false) {
       // 3. Disconnected / Reconnect Event
       if (connection === 'close') {
         waReady = false;
+        isInitializing = false;
         const statusCode = (lastDisconnect?.error instanceof Boom) 
           ? lastDisconnect.error.output?.statusCode 
           : null;
         
         console.warn(`⚠️ [WhatsApp - Baileys] Connection closed. Status code: ${statusCode}`);
 
-        // Only hard-reset session files on explicit logout or 401 Unauthorized
-        if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
-          console.log(`🔄 [WhatsApp - Baileys] Logged out (Status ${statusCode}). Purging old credentials for fresh QR...`);
+        // Reset and generate fresh QR session if unlinked/timeout/logged out
+        if (statusCode === DisconnectReason.loggedOut || statusCode === 401 || statusCode === 408 || statusCode === 515 || !connectedPhone) {
+          console.log(`🔄 [WhatsApp - Baileys] Session closed/timed out (Status ${statusCode}). Refreshing socket for new QR...`);
           connectionStatus = 'initializing';
           latestQrCodeDataUrl = null;
           latestQrCodeRaw = null;
-          connectedPhone = null;
           setTimeout(() => {
             isInitializing = false;
-            initWhatsApp(true);
+            initWhatsApp(false);
           }, 1500);
         } else {
-          // Soft reconnect without deleting existing paired keys
+          // Soft reconnect for paired session
           connectionStatus = 'initializing';
           setTimeout(() => {
             isInitializing = false;
@@ -312,6 +314,12 @@ export async function sendPaymentAlert(phone, farmerName, amount, status, refere
  */
 export function getWhatsAppStatus() {
   const isTrulyConnected = waReady && connectionStatus === 'connected';
+
+  // Proactively auto-trigger QR generation if idle without QR
+  if (!isTrulyConnected && !latestQrCodeDataUrl && !isInitializing && waEnabled) {
+    initWhatsApp(false);
+  }
+
   return {
     enabled: waEnabled,
     ready: isTrulyConnected,
